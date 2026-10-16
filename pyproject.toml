@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["Project Plan"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "B008",  # FastAPI's Depends() in argument defaults is the intended pattern
+    "B905",  # zip(strict=...) adds noise for the paired lists used here
+]

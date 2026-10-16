@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.pytest_cache/
+
+# runtime data
+storage/*
+!storage/.gitkeep
+eval/.storage/
+
+# test documents may hold personal data; keep them out of git
+eval/documents/*
+!eval/documents/.gitkeep
+eval/ocr_pages/*
+!eval/ocr_pages/.gitkeep
+eval/results/*
+!eval/results/.gitkeep
+eval/questions.jsonl
+eval/page_labels.csv
+.ruff_cache/

@@ -1,0 +1,4 @@
+{"id": "q01", "question": "درخواست جمع کروانے کی آخری تاریخ کیا ہے؟", "language": "ur", "answer": "15 مارچ 2026", "document": "notice_admissions.pdf", "pages": [1], "answerable": true}
+{"id": "q02", "question": "What is the monthly stipend amount in the welfare policy?", "language": "en", "answer": "Rs. 12,000 per month", "document": "welfare_policy_2025.pdf", "pages": [4], "answerable": true}
+{"id": "q03", "question": "Who signed the lease agreement on behalf of the landlord?", "language": "en", "answer": "محمد اسلم", "document": "lease_agreement_scanned.pdf", "pages": [6, 7], "answerable": true}
+{"id": "q04", "question": "کیا اس پالیسی میں بیرون ملک تعلیم کے اخراجات شامل ہیں؟", "language": "ur", "answer": null, "document": null, "pages": [], "answerable": false}
