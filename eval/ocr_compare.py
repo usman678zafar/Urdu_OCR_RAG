@@ -5,7 +5,7 @@
    This writes eval/ocr_pages/notice_p3.png.
 2. Type the page's exact text into eval/ocr_pages/notice_p3.txt (UTF-8).
 3. Run the comparison:
-       python -m eval.ocr_compare run --engines tesseract,claude,docai
+       python -m eval.ocr_compare run --engines tesseract,gemini,docai
 
 CER = edit distance / reference length, after both sides pass through the same
 Urdu normalizer and whitespace is collapsed. Results go to eval/results/.

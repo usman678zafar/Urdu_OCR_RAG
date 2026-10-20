@@ -28,6 +28,7 @@ STAMP := .venv/.installed
 HOST ?= 127.0.0.1
 PORT ?= 8000
 UI_PORT ?= 8501
+WEB_PORT ?= 5173
 API_URL ?= http://localhost:$(PORT)
 # CPU-only torch is ~2 GB smaller; set TORCH_INDEX= (empty) for a CUDA build
 TORCH_INDEX ?= https://download.pytorch.org/whl/cpu
@@ -66,17 +67,24 @@ $(STAMP): requirements.txt requirements-dev.txt | $(PY)
 
 env: ## Create .env from .env.example (never overwrites)
 	@if [ -f .env ]; then echo ".env already exists; leaving it unchanged"; \
-	else cp .env.example .env && echo "Created .env; set ANTHROPIC_API_KEY in it"; fi
+	else cp .env.example .env && echo "Created .env; set GEMINI_API_KEY in it"; fi
 
-doctor: ## Check Python env, Tesseract + Urdu, API key and Docker
+doctor: ## Check Python env, LLM API keys, Tesseract + Urdu and Docker
 	@ok() { printf '  \033[32mok\033[0m    %s\n' "$$1"; }; \
 	bad() { printf '  \033[31mmissing\033[0m %s\n' "$$1"; }; \
 	envval() { grep -E "^$$1=" .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r"'; }; \
 	if [ -f "$(STAMP)" ]; then ok "Python env ($$($(PY) --version 2>&1))"; \
 	else bad "Python env: run 'make install'"; fi; \
 	if [ -f .env ]; then ok ".env"; else bad ".env: run 'make env'"; fi; \
-	if [ -n "$$(envval ANTHROPIC_API_KEY)" ] || [ -n "$$ANTHROPIC_API_KEY" ]; then ok "ANTHROPIC_API_KEY is set"; \
-	else bad "ANTHROPIC_API_KEY: needed for answers; set it in .env"; fi; \
+	keyset() { [ -n "$$(envval "$$1")" ] || [ -n "$$(printenv "$$1")" ]; }; \
+	for role in primary backup; do \
+	  if [ $$role = primary ]; then prov="$$(envval LLM_PROVIDER)"; prov="$${prov:-gemini}"; \
+	  else prov="$$(envval LLM_BACKUP_PROVIDER)"; fi; \
+	  [ -z "$$prov" ] && continue; \
+	  key="$$(echo "$$prov" | tr a-z A-Z)_API_KEY"; \
+	  if keyset "$$key"; then ok "$$key is set ($$role LLM: $$prov)"; \
+	  else bad "$$key: needed for the $$role LLM ($$prov); set it in .env"; fi; \
+	done; \
 	tess="$$(envval TESSERACT_CMD)"; tess="$${tess:-tesseract}"; \
 	langs="$$("$$tess" --list-langs 2>/dev/null | tr -d '\r')"; \
 	if [ -z "$$langs" ]; then bad "Tesseract: install it or set TESSERACT_CMD in .env"; \
@@ -86,7 +94,7 @@ doctor: ## Check Python env, Tesseract + Urdu, API key and Docker
 	else bad "Docker: only needed for 'make docker-up'"; fi
 
 ##@ Run
-.PHONY: backend frontend dev
+.PHONY: backend frontend web web-install web-build dev dev-streamlit
 
 backend: $(STAMP) ## Run the FastAPI backend with auto-reload (http://localhost:PORT/docs)
 	$(PY) -m uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
@@ -95,11 +103,25 @@ frontend: $(STAMP) ## Run the Streamlit frontend against API_URL (http://localho
 	@echo "Frontend: http://localhost:$(UI_PORT)  (backend: $(API_URL))"
 	API_URL=$(API_URL) $(STREAMLIT)
 
-dev: $(STAMP) ## Run backend and frontend together; Ctrl+C stops both
+web/node_modules: web/package.json web/package-lock.json
+	cd web && npm install
+	@touch $@
+
+web-install: web/node_modules ## Install the React UI's npm packages
+
+web: web/node_modules ## Run the React UI dev server against API_URL (http://localhost:WEB_PORT)
+	cd web && API_URL=$(API_URL) npx vite --port $(WEB_PORT)
+
+web-build: web/node_modules ## Build the React UI into web/dist
+	cd web && npm run build
+
+dev: $(STAMP) web/node_modules ## Run backend and React UI together; Ctrl+C stops both
+	@echo "Backend: http://localhost:$(PORT)/docs   UI: http://localhost:$(WEB_PORT)"
+	@$(PY) -m uvicorn app.main:app --host $(HOST) --port $(PORT) & api_pid=$$!; 	trap 'kill $$api_pid 2>/dev/null' EXIT; 	cd web && API_URL=$(API_URL) npx vite --port $(WEB_PORT)
+
+dev-streamlit: $(STAMP) ## Run backend and the old Streamlit UI together
 	@echo "Backend: http://localhost:$(PORT)/docs   Frontend: http://localhost:$(UI_PORT)"
-	@$(PY) -m uvicorn app.main:app --host $(HOST) --port $(PORT) & api_pid=$$!; \
-	trap 'kill $$api_pid 2>/dev/null' EXIT; \
-	API_URL=$(API_URL) $(STREAMLIT)
+	@$(PY) -m uvicorn app.main:app --host $(HOST) --port $(PORT) & api_pid=$$!; 	trap 'kill $$api_pid 2>/dev/null' EXIT; 	API_URL=$(API_URL) $(STREAMLIT)
 
 ##@ Quality
 .PHONY: test lint lint-check
@@ -134,7 +156,7 @@ ocr-render: $(STAMP) ## Render pages for OCR references: make ocr-render PDF=eva
 	$(if $(PAGES),,$(error PAGES is required, e.g. PAGES="2 5"))
 	$(PY) -m eval.ocr_compare render "$(PDF)" $(PAGES)
 
-ocr-compare: $(STAMP) ## Phase 3 gate: OCR error rate, e.g. ENGINES=tesseract,claude,docai
+ocr-compare: $(STAMP) ## Phase 3 gate: OCR error rate, e.g. ENGINES=tesseract,gemini,docai
 	$(PY) -m eval.ocr_compare run --engines $(ENGINES)
 
 ##@ Docker

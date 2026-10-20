@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     image_page_max_chars: int = 300  # a big image with little text is a scan with a stamp/header
 
     # OCR
-    ocr_engine: Literal["tesseract", "claude", "docai"] = "tesseract"
+    ocr_engine: Literal["tesseract", "gemini", "claude", "docai"] = "tesseract"
     tesseract_cmd: str | None = None  # e.g. C:\Program Files\Tesseract-OCR\tesseract.exe
     tesseract_lang: str = "urd+eng"
     tesseract_config: str = "--oem 1 --psm 3"
@@ -54,14 +54,36 @@ class Settings(BaseSettings):
     candidate_k: int = 20
     final_top_k: int = 6
 
-    # Generation
-    anthropic_api_key: str | None = None  # falls back to the SDK's own credential lookup
-    llm_model: str = "claude-sonnet-5-5"
+    # Generation: the primary provider answers; the backup is used only if the primary fails
+    llm_provider: Literal["gemini", "openai", "anthropic"] = "gemini"
+    llm_backup_provider: Literal["gemini", "openai", "anthropic"] | None = None
+    answer_cache_size: int = 256
+
+    # Gemini
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_thinking_budget: int = 0  # 0 = no thinking (fastest); -1 = let the model decide
+
+    # OpenAI or any OpenAI-compatible API (set OPENAI_BASE_URL for a proxy)
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openai_model: str = "gpt-4o-mini"
+
+    # Anthropic
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-sonnet-5-5"
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     llm_max_tokens: int = 16000
     llm_fallbacks: bool = True  # server-side refusal fallback (Claude API only)
-    vision_ocr_model: str = "claude-sonnet-5-5"
-    answer_cache_size: int = 256
+
+    @property
+    def llm_model(self) -> str:
+        """The model answering questions, for display and the results log."""
+        return {
+            "gemini": self.gemini_model,
+            "openai": self.openai_model,
+            "anthropic": self.anthropic_model,
+        }[self.llm_provider]
 
     @property
     def db_path(self) -> Path:

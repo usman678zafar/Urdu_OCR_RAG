@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config import Settings
+from app.generation.providers import LLMRefused, make_provider
 from app.ingestion import pdf
 from app.processing.normalize import normalize
 from app.services import Services
@@ -87,22 +88,13 @@ def ingest(services: Services, docs_dir: Path) -> dict[str, int]:
     return ids
 
 
-def judge(client, model: str, question: str, reference: str, answer: str) -> tuple[bool, str]:
-    response = client.messages.create(
-        model=model,
-        max_tokens=4000,
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": JUDGE_SCHEMA}},
-        messages=[
-            {
-                "role": "user",
-                "content": JUDGE_PROMPT.format(question=question, reference=reference, answer=answer),
-            }
-        ],
-    )
-    if response.stop_reason == "refusal":
+def judge(provider, question: str, reference: str, answer: str) -> tuple[bool, str]:
+    prompt = JUDGE_PROMPT.format(question=question, reference=reference, answer=answer)
+    try:
+        data = provider.complete_json("You grade answers strictly and briefly.", prompt, JUDGE_SCHEMA)
+    except LLMRefused:
         return False, "judge declined"
-    data = json.loads(next(b.text for b in response.content if b.type == "text"))
-    return bool(data["correct"]), data["reason"]
+    return bool(data.get("correct")), str(data.get("reason", ""))
 
 
 def on_expected_page(filename: str, page_no: int, q: dict) -> bool:
@@ -123,9 +115,13 @@ def main() -> None:
     ap.add_argument("--storage", type=Path, default=EVAL_DIR / ".storage")
     ap.add_argument("--embedding-model")
     ap.add_argument("--no-reranker", action="store_true")
-    ap.add_argument("--ocr-engine", choices=["tesseract", "claude", "docai"])
+    ap.add_argument("--ocr-engine", choices=["tesseract", "gemini", "claude", "docai"])
     ap.add_argument("--retrieval-only", action="store_true", help="skip the LLM; score retrieval only")
-    ap.add_argument("--judge-model", default="claude-sonnet-5-5")
+    ap.add_argument(
+        "--judge-provider",
+        choices=["gemini", "openai", "anthropic"],
+        help="LLM that grades answers (default: the answering provider)",
+    )
     ap.add_argument("--limit", type=int, help="only the first N questions")
     args = ap.parse_args()
 
@@ -149,11 +145,9 @@ def main() -> None:
     if missing:
         print(f"Warning: questions refer to documents not in {args.documents}: {sorted(missing)}")
 
-    judge_client = None
+    judge_provider = None
     if not args.retrieval_only:
-        import anthropic
-
-        judge_client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
+        judge_provider = make_provider(args.judge_provider or settings.llm_provider, settings)
 
     rows = []
     for i, q in enumerate(questions, 1):
@@ -191,7 +185,7 @@ def main() -> None:
                 )
                 if result.found:
                     row["correct"], row["judge_reason"] = judge(
-                        judge_client, args.judge_model, q["question"], q["answer"], result.answer
+                        judge_provider, q["question"], q["answer"], result.answer
                     )
                 else:
                     row["correct"], row["judge_reason"] = False, "system said not found"

@@ -15,7 +15,7 @@ Indexing   Upload ─► Classify pages ─► Extract or OCR ─► Clean + nor
                                               │
 Storage    SQLite (documents, pages, chunks, queries) · ChromaDB vectors · page images on disk
                                               │
-Answering  Question ─► Normalize ─► Hybrid retrieve ─► Rerank ─► Claude, sources only ─► Citation check
+Answering  Question ─► Normalize ─► Hybrid retrieve ─► Rerank ─► LLM, sources only ─► Citation check
                                     (vectors + BM25,   (bge-reranker,  (structured JSON)   (quote must be
                                      RRF, top 20)       top 6)                               in its chunk)
 ```
@@ -25,13 +25,13 @@ Every chunk stays on one page, so each citation points at an exact page image.
 | Module | What it does |
 | --- | --- |
 | [app/ingestion/classifier.py](app/ingestion/classifier.py) | Per page: trust the text layer, or OCR. Catches empty pages, private-use glyphs, Latin-1 mojibake, broken ligature mappings, letters split apart, reversed or garbled words (no common Urdu/English words), and scans with a small typed header |
-| [app/ingestion/ocr.py](app/ingestion/ocr.py) | Three engines behind one interface: Tesseract (`urd+eng`), Claude vision, Google Document AI |
+| [app/ingestion/ocr.py](app/ingestion/ocr.py) | Engines behind one interface: Tesseract (`urd+eng`), Gemini vision, Claude vision, Google Document AI |
 | [app/processing/bidi.py](app/processing/bidi.py) | Repairs Urdu lines extracted in visual (reversed) word order, a common PDF text-layer fault, by checking frequent Urdu word pairs in both directions |
 | [app/processing/normalize.py](app/processing/normalize.py) | NFKC (presentation forms → letters), letter variants, Urdu/Arabic digits → ASCII, diacritics, tatweel, spacing. Used for documents **and** questions |
 | [app/processing/cleanup.py](app/processing/cleanup.py) | Removes running headers/footers and page-number lines |
 | [app/processing/chunking.py](app/processing/chunking.py) | Sentence-aware chunks (`۔ ؟ ! . ?`) with overlap, never crossing a page |
 | [app/retrieval/](app/retrieval/) | BGE-M3 embeddings, ChromaDB, BM25, reciprocal rank fusion, bge-reranker-v2-m3 |
-| [app/generation/](app/generation/) | Sources-only prompt, Claude client with structured output, citation verification, answer cache |
+| [app/generation/](app/generation/) | Sources-only prompt, LLM providers (Gemini by default, optional OpenAI-compatible backup, Anthropic) with JSON output, citation verification, answer cache |
 | [app/api/](app/api/) | FastAPI routes |
 | [ui/streamlit_app.py](ui/streamlit_app.py) | Prototype UI with right-to-left text, Noto Nastaliq Urdu and page previews |
 | [eval/](eval/) | Test-set runner, OCR comparison, classifier report |
@@ -63,7 +63,7 @@ It works from PowerShell or Git Bash on Windows (it needs [GNU Make](https://com
    pip install -r requirements-dev.txt
    ```
 2. **Tesseract with Urdu.** Install from the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki) and tick *Urdu* under additional languages, or drop `urd.traineddata` into `C:\Program Files\Tesseract-OCR\tessdata`. The [tessdata_best](https://github.com/tesseract-ocr/tessdata_best) model is slower but more accurate on Nastaliq. Check with `tesseract --list-langs`.
-3. **Configuration.** Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY` (and `TESSERACT_CMD` if Tesseract is not on PATH).
+3. **Configuration.** Copy `.env.example` to `.env` and set `GEMINI_API_KEY` (and `TESSERACT_CMD` if Tesseract is not on PATH).
 4. **Run:**
    ```powershell
    uvicorn app.main:app --reload          # API on http://localhost:8000, docs at /docs
@@ -75,7 +75,7 @@ The first upload downloads BGE-M3 (~2.3 GB), and the first question downloads th
 ## Setup (Docker)
 
 ```bash
-cp .env.example .env        # set ANTHROPIC_API_KEY
+cp .env.example .env        # set GEMINI_API_KEY
 docker compose up --build   # API :8000, UI :8501
 ```
 
@@ -126,7 +126,7 @@ Each change is judged against one fixed test set. The scripts index `eval/docume
 | --- | --- |
 | Classifier right on 95% of pages | `python -m eval.classify_report` (label pages in `eval/page_labels.csv`, see the example) |
 | Baseline scores recorded | `python -m eval.run_eval --label baseline` |
-| OCR error rate under 10% | `python -m eval.ocr_compare render eval/documents/x.pdf 2 5`, type the reference `.txt` files, then `python -m eval.ocr_compare run --engines tesseract,claude,docai` |
+| OCR error rate under 10% | `python -m eval.ocr_compare render eval/documents/x.pdf 2 5`, type the reference `.txt` files, then `python -m eval.ocr_compare run --engines tesseract,gemini,docai` |
 | Answer accuracy over 80% | `python -m eval.run_eval --label <experiment>` |
 
 Comparing models is cheap: retrieval-only runs skip the LLM, and switching embedding models re-embeds stored chunks without re-running OCR.
@@ -137,7 +137,7 @@ python -m eval.run_eval --label e5-large --retrieval-only --embedding-model intf
 python -m eval.run_eval --label no-rerank --no-reranker
 ```
 
-Every run appends a row to `eval/results/log.csv`, and writes per-question detail to a JSON file next to it. Answer accuracy is graded by Claude against your reference answer; retrieval hit@5, citation accuracy and not-found accuracy are computed directly.
+Every run appends a row to `eval/results/log.csv`, and writes per-question detail to a JSON file next to it. Answer accuracy is graded by the answering LLM (or `--judge-provider`) against your reference answer; retrieval hit@5, citation accuracy and not-found accuracy are computed directly.
 
 ## Configuration
 
@@ -145,19 +145,20 @@ All settings are in [app/config.py](app/config.py) and can be set in `.env`. The
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| `OCR_ENGINE` | `tesseract` | `claude` and `docai` send page images to outside services |
+| `OCR_ENGINE` | `tesseract` | `gemini`, `claude` and `docai` send page images to outside services |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | e5 models get their `query:`/`passage:` prefixes automatically |
 | `RERANKER_ENABLED` | `true` | |
 | `RERANK_MIN_SCORE` | unset | When set, low-scoring retrievals answer "not found" without calling the LLM |
 | `FINAL_TOP_K` | `6` | Chunks sent to the LLM |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `150` | Characters |
-| `LLM_MODEL` / `LLM_EFFORT` | `claude-sonnet-5-5` / `low` | Raise the effort if answer accuracy is short of the gate and latency allows |
-| `LLM_FALLBACKS` | `true` | Server-side refusal fallback: if Claude declines a request, the API retries it on another model instead of failing |
+| `LLM_PROVIDER` / `GEMINI_MODEL` | `gemini` / `gemini-2.5-flash` | Also `openai` or `anthropic` |
+| `LLM_BACKUP_PROVIDER` | unset | e.g. `openai`: used only when the primary fails (quota, outage, bad output). `OPENAI_BASE_URL` points it at any OpenAI-compatible API |
+| `GEMINI_THINKING_BUDGET` | `0` | `0` is fastest; `-1` lets Gemini think, which may help accuracy at some latency cost |
 | `LOW_CONFIDENCE_THRESHOLD` | `0.6` | OCR pages below this are flagged |
 
 ## Privacy
 
-Tesseract and the embedding and reranking models run locally. Retrieved passages, never whole documents, are sent to the Anthropic API to write answers. Choosing `OCR_ENGINE=claude` or `docai` also sends page images out. Add access control before any shared deployment.
+Tesseract and the embedding and reranking models run locally. Retrieved passages, never whole documents, are sent to the configured LLM API (Gemini by default) to write answers. Choosing `OCR_ENGINE=gemini`, `claude` or `docai` also sends page images out. Add access control before any shared deployment.
 
 ## Tests
 

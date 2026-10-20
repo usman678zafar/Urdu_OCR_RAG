@@ -7,7 +7,7 @@ from functools import cached_property
 from app.config import Settings, get_settings
 from app.db.database import Database
 from app.generation.answer import AnswerService
-from app.generation.llm import AnswerLLM, ClaudeLLM
+from app.generation.llm import AnswerLLM, ProviderLLM
 from app.ingestion.ocr import OCREngine, make_ocr_engine
 from app.ingestion.pipeline import IndexingPipeline
 from app.retrieval.bm25 import BM25Index
@@ -68,7 +68,7 @@ class Services:
 
     @property
     def llm(self) -> AnswerLLM:
-        return self._locked("_llm", lambda: ClaudeLLM(self.settings))
+        return self._locked("_llm", lambda: ProviderLLM(self.settings))
 
     @llm.setter
     def llm(self, value: AnswerLLM) -> None:

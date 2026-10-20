@@ -1,7 +1,8 @@
 """Urdu OCR engines behind one interface, so they can be compared and swapped.
 
 - tesseract: local, free baseline (needs the `urd` traineddata installed)
-- claude:    a vision LLM; strong on Nastaliq but sends page images to the API
+- gemini:    Gemini vision; strong on Nastaliq but sends page images to Google
+- claude:    Claude vision; also sends page images to an outside API
 - docai:     Google Document AI OCR processor; also an outside service
 """
 
@@ -75,6 +76,26 @@ _VISION_PROMPT = (
 )
 
 
+def _jpeg(image: Image.Image) -> bytes:
+    img = image.copy()
+    img.thumbnail((2000, 2000))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+class GeminiVisionOCR:
+    name = "gemini"
+
+    def __init__(self, settings: Settings):
+        from app.generation.providers import GeminiProvider
+
+        self.provider = GeminiProvider(settings)
+
+    def ocr(self, image: Image.Image) -> OCRResult:
+        return OCRResult(text=self.provider.transcribe(_jpeg(image), _VISION_PROMPT), confidence=None)
+
+
 class ClaudeVisionOCR:
     name = "claude"
 
@@ -83,7 +104,7 @@ class ClaudeVisionOCR:
 
         self._anthropic = anthropic
         self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
-        self.model = settings.vision_ocr_model
+        self.model = settings.anthropic_model
         self.fallbacks = settings.llm_fallbacks
 
     def ocr(self, image: Image.Image) -> OCRResult:
@@ -150,7 +171,12 @@ class DocumentAIOCR:
 
 
 def make_ocr_engine(name: str, settings: Settings) -> OCREngine:
-    engines = {"tesseract": TesseractOCR, "claude": ClaudeVisionOCR, "docai": DocumentAIOCR}
+    engines = {
+        "tesseract": TesseractOCR,
+        "gemini": GeminiVisionOCR,
+        "claude": ClaudeVisionOCR,
+        "docai": DocumentAIOCR,
+    }
     if name not in engines:
         raise ValueError(f"Unknown OCR engine {name!r}; choose from {sorted(engines)}")
     return engines[name](settings)
