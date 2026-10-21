@@ -89,11 +89,17 @@ class FakeLLM:
 
 @pytest.fixture
 def services(tmp_path) -> Services:
-    settings = Settings(_env_file=None, storage_dir=tmp_path / "storage", embedding_model="fake-embedder")
+    settings = Settings(
+        _env_file=None,
+        storage_dir=tmp_path / "storage",
+        embedding_model="fake-embedder",
+        preload_models=False,
+    )
     s = Services(settings)
     s.embedder = FakeEmbedder()
     s.reranker = FakeReranker()
     s.ocr = FakeOCR()
+    s.fallback_ocr = None  # never call a real outside OCR service from tests
     s.llm = FakeLLM()
     return s
 

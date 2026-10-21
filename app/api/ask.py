@@ -53,4 +53,5 @@ async def ask(body: AskIn, services: Services = Depends(get_services)):
         latency_ms=result.latency_ms,
         cached=result.cached,
         note=result.note,
+        timings=result.timings if services.settings.debug_timings else None,
     )

@@ -9,6 +9,7 @@ class DocumentOut(BaseModel):
     sha256: str
     page_count: int
     pages_done: int
+    pages_failed: int = 0
     status: str
     error: str | None
     uploaded_at: str
@@ -22,9 +23,12 @@ class UploadOut(BaseModel):
 
 class PageOut(BaseModel):
     page_no: int
-    method: str
+    method: str  # text | tesseract | gemini | claude | docai
     reason: str | None
     ocr_confidence: float | None
+    ocr_status: str  # ok | low_quality | failed
+    quality: float | None  # share of Urdu (Arabic-script) letters among all letters
+    error: str | None
     low_confidence: bool
     text_chars: int
     image_url: str
@@ -58,3 +62,4 @@ class AskOut(BaseModel):
     latency_ms: int
     cached: bool
     note: str | None = None
+    timings: dict[str, int] | None = None  # milliseconds per step, when DEBUG_TIMINGS is on

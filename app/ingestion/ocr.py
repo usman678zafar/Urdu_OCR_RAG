@@ -90,7 +90,7 @@ class GeminiVisionOCR:
     def __init__(self, settings: Settings):
         from app.generation.providers import GeminiProvider
 
-        self.provider = GeminiProvider(settings)
+        self.provider = GeminiProvider(settings, model=settings.gemini_ocr_model)
 
     def ocr(self, image: Image.Image) -> OCRResult:
         return OCRResult(text=self.provider.transcribe(_jpeg(image), _VISION_PROMPT), confidence=None)

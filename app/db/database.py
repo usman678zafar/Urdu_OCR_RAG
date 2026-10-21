@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS documents (
     sha256      TEXT NOT NULL UNIQUE,
     page_count  INTEGER NOT NULL DEFAULT 0,
     pages_done  INTEGER NOT NULL DEFAULT 0,
+    pages_failed INTEGER NOT NULL DEFAULT 0,
     status      TEXT NOT NULL,
     error       TEXT,
     uploaded_at TEXT NOT NULL,
@@ -29,6 +30,9 @@ CREATE TABLE IF NOT EXISTS pages (
     raw_text       TEXT NOT NULL DEFAULT '',
     image_path     TEXT,
     ocr_confidence REAL,
+    ocr_status     TEXT NOT NULL DEFAULT 'ok',
+    quality        REAL,
+    error          TEXT,
     UNIQUE (document_id, page_no)
 );
 CREATE TABLE IF NOT EXISTS chunks (
@@ -59,6 +63,12 @@ CREATE TABLE IF NOT EXISTS meta (
 
 STATUSES = ("uploaded", "extracting", "indexing", "ready", "failed")
 
+# Columns added after the first release; created on startup if an older database lacks them
+_MIGRATIONS = {
+    "documents": {"pages_failed": "INTEGER NOT NULL DEFAULT 0"},
+    "pages": {"ocr_status": "TEXT NOT NULL DEFAULT 'ok'", "quality": "REAL", "error": "TEXT"},
+}
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -71,6 +81,11 @@ class Database:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            for table, columns in _MIGRATIONS.items():
+                have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+                for name, decl in columns.items():
+                    if name not in have:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -130,11 +145,11 @@ class Database:
                 (status, error, _now(), doc_id),
             )
 
-    def set_progress(self, doc_id: int, pages_done: int) -> None:
+    def set_progress(self, doc_id: int, pages_done: int, pages_failed: int = 0) -> None:
         with self.connect() as conn:
             conn.execute(
-                "UPDATE documents SET pages_done = ?, updated_at = ? WHERE id = ?",
-                (pages_done, _now(), doc_id),
+                "UPDATE documents SET pages_done = ?, pages_failed = ?, updated_at = ? WHERE id = ?",
+                (pages_done, pages_failed, _now(), doc_id),
             )
 
     def fail_interrupted(self) -> list[int]:
@@ -171,12 +186,29 @@ class Database:
         raw_text: str,
         image_path: str | None,
         ocr_confidence: float | None,
+        ocr_status: str = "ok",
+        quality: float | None = None,
+        error: str | None = None,
     ) -> None:
+        """Insert or replace one page. ocr_status: ok | low_quality | failed."""
         with self.connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO pages (document_id, page_no, method, reason, text, raw_text,"
-                " image_path, ocr_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (doc_id, page_no, method, reason, text, raw_text, image_path, ocr_confidence),
+                " image_path, ocr_confidence, ocr_status, quality, error)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    doc_id,
+                    page_no,
+                    method,
+                    reason,
+                    text,
+                    raw_text,
+                    image_path,
+                    ocr_confidence,
+                    ocr_status,
+                    quality,
+                    error,
+                ),
             )
 
     def update_page_texts(self, doc_id: int, texts: dict[int, str]) -> None:
@@ -200,12 +232,13 @@ class Database:
             ).fetchone()
             return dict(row) if row else None
 
-    def clear_document_content(self, doc_id: int) -> None:
-        """Remove pages and chunks so a document can be processed again."""
+    def clear_document_content(self, doc_id: int, keep_pages: bool = False) -> None:
+        """Remove chunks (and pages, unless keep_pages) so a document can be processed again."""
         with self.connect() as conn:
             conn.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
-            conn.execute("DELETE FROM pages WHERE document_id = ?", (doc_id,))
-            conn.execute("UPDATE documents SET pages_done = 0 WHERE id = ?", (doc_id,))
+            if not keep_pages:
+                conn.execute("DELETE FROM pages WHERE document_id = ?", (doc_id,))
+            conn.execute("UPDATE documents SET pages_done = 0, pages_failed = 0 WHERE id = ?", (doc_id,))
             self._bump_index_version(conn)
 
     # ---- chunks ----------------------------------------------------------

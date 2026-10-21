@@ -48,6 +48,14 @@ export function Answer({ res }: { res: AskOut }) {
       <div className="answer-meta">
         <span>{(res.latency_ms / 1000).toFixed(1)}s</span>
         {res.cached && <span className="chip">cached</span>}
+        {res.timings &&
+          Object.entries(res.timings)
+            .filter(([k]) => k !== 'total')
+            .map(([k, ms]) => (
+              <span key={k} className="chip" title="Time spent in this step">
+                {k.replace('_', ' ')} {(ms / 1000).toFixed(1)}s
+              </span>
+            ))}
         {res.found && !res.grounded && (
           <span className="warn">Some quotes could not be matched to their source — check the pages.</span>
         )}

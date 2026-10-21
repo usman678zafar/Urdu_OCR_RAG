@@ -20,6 +20,11 @@ log = logging.getLogger(__name__)
 class LLMError(RuntimeError):
     """The LLM could not be reached or returned an unusable response."""
 
+    def __init__(self, message: str, status: int | None = None, retryable: bool = False):
+        super().__init__(message)
+        self.status = status  # HTTP status from the provider, when there was one
+        self.retryable = retryable  # network failure or timeout, worth trying again
+
 
 class LLMRefused(RuntimeError):
     """The model declined to answer (safety filter or refusal)."""
@@ -56,28 +61,32 @@ class GeminiProvider:
         self.model = model or settings.gemini_model
         self.thinking_budget = settings.gemini_thinking_budget
 
-    def _config(self, system: str | None, schema: dict | None):
+    def _config(self, system: str | None, schema: dict | None, thinking: bool = True):
         types = self._genai.types
+        # Some models (e.g. the lite ones) reject a thinking budget, so OCR sends none
+        send_budget = thinking and self.thinking_budget is not None
         return types.GenerateContentConfig(
             system_instruction=system,
             temperature=0,
             response_mime_type="application/json" if schema else None,
             response_json_schema=schema,
-            thinking_config=types.ThinkingConfig(thinking_budget=self.thinking_budget),
+            thinking_config=types.ThinkingConfig(thinking_budget=self.thinking_budget)
+            if send_budget
+            else None,
         )
 
-    def _generate(self, contents, system: str | None, schema: dict | None):
+    def _generate(self, contents, system: str | None, schema: dict | None, thinking: bool = True):
         errors = self._genai.errors
         try:
             response = self.client.models.generate_content(
-                model=self.model, contents=contents, config=self._config(system, schema)
+                model=self.model, contents=contents, config=self._config(system, schema, thinking)
             )
         except errors.ClientError as e:
-            raise LLMError(f"Gemini rejected the request ({e.code}): {e.message}") from e
+            raise LLMError(f"Gemini rejected the request ({e.code}): {e.message}", status=e.code) from e
         except errors.APIError as e:
-            raise LLMError(f"Gemini API error ({e.code}): {e.message}") from e
+            raise LLMError(f"Gemini API error ({e.code}): {e.message}", status=e.code) from e
         except Exception as e:  # network failures surface as httpx errors
-            raise LLMError(f"Could not reach Gemini: {e}") from e
+            raise LLMError(f"Could not reach Gemini: {e}", retryable=True) from e
 
         feedback = response.prompt_feedback
         if feedback is not None and feedback.block_reason:
@@ -96,7 +105,7 @@ class GeminiProvider:
     def transcribe(self, image_jpeg: bytes, prompt: str) -> str:
         """Vision call used by the Gemini OCR engine."""
         part = self._genai.types.Part.from_bytes(data=image_jpeg, mime_type="image/jpeg")
-        return (self._generate([part, prompt], None, None).text or "").strip()
+        return (self._generate([part, prompt], None, None, thinking=False).text or "").strip()
 
 
 class OpenAIProvider:
@@ -129,11 +138,15 @@ class OpenAIProvider:
         except o.AuthenticationError as e:
             raise LLMError("OpenAI-compatible API rejected the key; check OPENAI_API_KEY.") from e
         except o.RateLimitError as e:
-            raise LLMError("OpenAI-compatible API rate limit or quota reached.") from e
+            raise LLMError("OpenAI-compatible API rate limit or quota reached.", status=429) from e
         except o.APIStatusError as e:
-            raise LLMError(f"OpenAI-compatible API error {e.status_code}: {e.message}") from e
+            raise LLMError(
+                f"OpenAI-compatible API error {e.status_code}: {e.message}", status=e.status_code
+            ) from e
         except o.APIConnectionError as e:
-            raise LLMError("Could not reach the OpenAI-compatible API; check OPENAI_BASE_URL.") from e
+            raise LLMError(
+                "Could not reach the OpenAI-compatible API; check OPENAI_BASE_URL.", retryable=True
+            ) from e
 
         choice = response.choices[0]
         if choice.finish_reason == "content_filter" or getattr(choice.message, "refusal", None):
@@ -170,11 +183,11 @@ class AnthropicProvider:
         except a.AuthenticationError as e:
             raise LLMError("Anthropic API key is missing or invalid; set ANTHROPIC_API_KEY.") from e
         except a.RateLimitError as e:
-            raise LLMError("Anthropic API rate limit reached; try again shortly.") from e
+            raise LLMError("Anthropic API rate limit reached; try again shortly.", status=429) from e
         except a.APIStatusError as e:
-            raise LLMError(f"Anthropic API error {e.status_code}: {e.message}") from e
+            raise LLMError(f"Anthropic API error {e.status_code}: {e.message}", status=e.status_code) from e
         except a.APIConnectionError as e:
-            raise LLMError("Could not reach the Anthropic API.") from e
+            raise LLMError("Could not reach the Anthropic API.", retryable=True) from e
         except TypeError as e:  # raised when no credentials can be resolved at all
             raise LLMError(f"Anthropic client is not configured: {e}") from e
 

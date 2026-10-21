@@ -1,6 +1,9 @@
 """Hybrid retrieval: dense + BM25 candidates fused with reciprocal rank fusion,
 then reordered by the cross-encoder reranker."""
 
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from app.config import Settings
@@ -23,6 +26,18 @@ class RetrievedChunk:
     score: float  # reranker score, or fused RRF score when reranking is off
     dense_rank: int | None
     bm25_rank: int | None
+    similarity: float | None = None  # cosine similarity from the vector search, if it found this chunk
+
+
+@contextmanager
+def timed(timings: dict[str, int] | None, step: str) -> Iterator[None]:
+    """Add the block's wall time in milliseconds to timings[step]."""
+    start = time.perf_counter()
+    try:
+        yield
+    finally:
+        if timings is not None:
+            timings[step] = timings.get(step, 0) + int((time.perf_counter() - start) * 1000)
 
 
 def rrf_fuse(*rankings: list[int]) -> list[tuple[int, float]]:
@@ -51,23 +66,30 @@ class HybridRetriever:
         self.reranker = reranker
 
     def retrieve(
-        self, normalized_query: str, document_ids: list[int] | None = None, top_k: int | None = None
+        self,
+        normalized_query: str,
+        document_ids: list[int] | None = None,
+        top_k: int | None = None,
+        timings: dict[str, int] | None = None,
     ) -> list[RetrievedChunk]:
+        """Best chunks for the query; per-step milliseconds are added to `timings` if given."""
         s = self.settings
         top_k = top_k or s.final_top_k
 
-        dense = [
-            cid
-            for cid, _ in self.store.search(
-                self.embedder.embed_query(normalized_query), s.dense_top_k, document_ids
-            )
-        ]
-        keyword = [cid for cid, _ in self.bm25.search(normalized_query, s.bm25_top_k, document_ids)]
+        with timed(timings, "embed_query"):
+            query_vector = self.embedder.embed_query(normalized_query)
+        with timed(timings, "vector_search"):
+            dense_hits = self.store.search(query_vector, s.dense_top_k, document_ids)
+        dense = [cid for cid, _ in dense_hits]
+        similarity = dict(dense_hits)
+        with timed(timings, "bm25"):
+            keyword = [cid for cid, _ in self.bm25.search(normalized_query, s.bm25_top_k, document_ids)]
         fused = rrf_fuse(dense, keyword)[: s.candidate_k]
         if not fused:
             return []
 
-        rows = self.db.get_chunks([cid for cid, _ in fused])
+        with timed(timings, "fetch_chunks"):
+            rows = self.db.get_chunks([cid for cid, _ in fused])
         # skip chunks whose document was deleted or is mid-reprocessing
         candidates = [
             (cid, score) for cid, score in fused if cid in rows and rows[cid]["doc_status"] == "ready"
@@ -78,7 +100,8 @@ class HybridRetriever:
         bm25_rank = {cid: i for i, cid in enumerate(keyword)}
 
         if self.reranker is not None:
-            scores = self.reranker.score(normalized_query, [rows[cid]["text"] for cid, _ in candidates])
+            with timed(timings, "rerank"):
+                scores = self.reranker.score(normalized_query, [rows[cid]["text"] for cid, _ in candidates])
             candidates = sorted(zip([c for c, _ in candidates], scores), key=lambda x: x[1], reverse=True)
 
         return [
@@ -91,6 +114,7 @@ class HybridRetriever:
                 score=float(score),
                 dense_rank=dense_rank.get(cid),
                 bm25_rank=bm25_rank.get(cid),
+                similarity=similarity.get(cid),
             )
             for cid, score in candidates[:top_k]
         ]

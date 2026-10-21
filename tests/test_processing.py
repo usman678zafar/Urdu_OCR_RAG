@@ -85,3 +85,20 @@ def test_rrf_rewards_agreement():
     fused = [cid for cid, _ in rrf_fuse([1, 2, 3], [3, 4, 1])]
     assert fused[:2] == [1, 3] or fused[:2] == [3, 1]
     assert set(fused) == {1, 2, 3, 4}
+
+
+def test_strips_urdu_page_numbers_and_book_watermark():
+    # shape of Gemini OCR output on a scanned book: page number on top, site watermark at the bottom
+    body = [
+        "علی شاہ سمیت تیرہ ججوں کی تقرری",
+        "روپے مقرر کی تھی۔ گزشتہ عرصے میں",
+        "میں فائرنگ سے دو افراد جاں بحق ہو گئے۔",
+    ]
+    pages = [
+        f"۳۹{i}\n{line}\nدوسری سطر یہاں ہے\nAcademy of the Punjab in North America: http://www.apnaorg.com"
+        for i, line in enumerate(body, start=7)
+    ]
+    cleaned = strip_headers_footers(pages)
+    for line, page in zip(body, cleaned):
+        assert page.splitlines()[0] == line
+        assert "apnaorg" not in page and "۳۹" not in page

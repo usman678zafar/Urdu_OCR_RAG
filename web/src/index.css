@@ -88,6 +88,8 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .doc-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 0.8rem; }
 .doc-actions { margin-left: auto; }
 .doc-error { margin-top: 6px; font-size: 0.8rem; color: var(--bad); word-break: break-word; }
+.doc-warn { margin-top: 6px; font-size: 0.78rem; color: var(--warn); word-break: break-word; }
+.bad { color: var(--bad); font-size: 0.85rem; font-weight: 600; }
 
 .badge { font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
 .badge-ready { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
@@ -184,7 +186,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .detail-head h2 { margin: 0 32px 8px 0; font-size: 1.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-stats { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); }
-.detail-stats .btn { margin-left: auto; }
+.detail-actions { margin-left: auto; display: flex; gap: 8px; }
 .detail-body { display: grid; grid-template-columns: 1fr 1.1fr; gap: 18px; margin-top: 16px; }
 .page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; align-content: start; max-height: 70vh; overflow-y: auto; padding-right: 4px; }
 .page-tile { border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; font-size: 0.7rem; gap: 1px; }
@@ -192,6 +194,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .page-tile.active { background: var(--accent-soft); }
 .page-tile.low { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
 .page-tile.low .page-conf { color: var(--warn); font-weight: 600; }
+.page-tile.failed { border-color: var(--bad); background: var(--bad-soft); }
+.page-tile.failed .page-conf { color: var(--bad); font-weight: 600; }
+.page-preview .notice { margin-bottom: 8px; }
 .page-no { font-size: 0.9rem; font-weight: 600; }
 .page-method { color: var(--muted); }
 .page-preview { min-height: 300px; }

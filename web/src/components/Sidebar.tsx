@@ -135,11 +135,13 @@ export function Sidebar({ docs, selected, onToggle, onChanged, onOpen, onNotice 
                     style={{ width: d.status === 'indexing' ? undefined : `${pct}%` }}
                   />
                   <span className="progress-label">
-                    {d.status === 'indexing' ? 'Building embeddings…' : `${d.pages_done} / ${d.page_count} pages`}
+                    {d.status === 'indexing'
+                      ? 'Building embeddings…'
+                      : `OCR ${d.pages_done}/${d.page_count}${d.pages_failed ? `, ${d.pages_failed} failed` : ''}`}
                   </span>
                 </div>
               )}
-              {d.error && <div className="doc-error">{d.error}</div>}
+              {d.error && <div className={d.status === 'failed' ? 'doc-error' : 'doc-warn'}>{d.error}</div>}
             </li>
           )
         })}

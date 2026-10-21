@@ -1,9 +1,9 @@
 """Show what is stored: documents, pages, chunks and their embedding vectors.
 
-    python scripts/inspect_store.py                  # summary + every chunk (short)
-    python scripts/inspect_store.py --chunk c20      # one chunk in full, with its vector
-    python scripts/inspect_store.py --search "سوال"  # nearest chunks to a question
-    python scripts/inspect_store.py --export chunks.csv
+python scripts/inspect_store.py                  # summary + every chunk (short)
+python scripts/inspect_store.py --chunk c20      # one chunk in full, with its vector
+python scripts/inspect_store.py --search "سوال"  # nearest chunks to a question
+python scripts/inspect_store.py --export chunks.csv
 """
 
 import argparse
@@ -37,7 +37,8 @@ def main() -> None:
 
     def chunk_row(vid):
         return db.execute(
-            "SELECT c.*, d.filename FROM chunks c JOIN documents d ON d.id = c.document_id WHERE vector_id = ?",
+            "SELECT c.*, d.filename FROM chunks c JOIN documents d ON d.id = c.document_id"
+            " WHERE vector_id = ?",
             (vid,),
         ).fetchone()
 

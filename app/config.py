@@ -10,6 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # Load the embedder and reranker in the background at startup, so the first question is fast
+    preload_models: bool = True
+
     # Storage
     storage_dir: Path = Path("storage")
     max_upload_mb: int = 50
@@ -36,6 +39,15 @@ class Settings(BaseSettings):
     docai_project_id: str | None = None
     docai_location: str = "us"
     docai_processor_id: str | None = None
+    # Fallback: when Tesseract's output on a page looks garbled, OCR that page again with this
+    # engine. Off -> page images are never sent to an outside service by the fallback.
+    ocr_fallback_enabled: bool = True
+    ocr_fallback_engine: Literal["tesseract", "gemini", "claude", "docai"] = "gemini"
+    ocr_min_urdu_share: float = 0.85  # Arabic-script share of letters below this -> garbled Urdu
+    ocr_min_letters: int = 20  # fewer letters than this -> Tesseract read nothing useful
+    ocr_concurrency: int = 4  # pages OCR'd at once; lowered automatically on rate limits
+    ocr_max_attempts: int = 4  # per page, for rate limits, server errors and timeouts
+    ocr_retry_base_delay: float = 2.0  # seconds; doubles each retry, plus jitter
 
     # Chunking
     chunk_size: int = 800  # characters
@@ -48,7 +60,11 @@ class Settings(BaseSettings):
     embedding_max_seq_length: int = 512
     reranker_enabled: bool = True
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    rerank_min_score: float | None = None  # below this top score, answer "not found" without the LLM
+    reranker_max_length: int = 512  # tokens per (question, chunk) pair; lower is faster on CPU
+    # Below this, answer "not found" without calling the LLM. Compared with the top reranker
+    # score (0-1) when the reranker is on, otherwise with the top vector similarity (0-1).
+    min_relevance_score: float | None = None
+    debug_timings: bool = False  # include per-step timings in /ask responses
     dense_top_k: int = 20
     bm25_top_k: int = 20
     candidate_k: int = 20
@@ -62,7 +78,10 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
-    gemini_thinking_budget: int = 0  # 0 = no thinking (fastest); -1 = let the model decide
+    gemini_ocr_model: str | None = None  # model for OCR_ENGINE=gemini; defaults to GEMINI_MODEL
+    gemini_thinking_budget: int | None = (
+        0  # None = send no thinking setting; 0 = no thinking (fastest); -1 = let the model decide
+    )
 
     # OpenAI or any OpenAI-compatible API (set OPENAI_BASE_URL for a proxy)
     openai_api_key: str | None = None

@@ -68,7 +68,11 @@ def get_document(doc_id: int, services: Services = Depends(get_services)):
             method=p["method"],
             reason=p["reason"],
             ocr_confidence=p["ocr_confidence"],
-            low_confidence=p["ocr_confidence"] is not None and p["ocr_confidence"] < threshold,
+            ocr_status=p["ocr_status"],
+            quality=p["quality"],
+            error=p["error"],
+            low_confidence=p["ocr_status"] != "ok"
+            or (p["ocr_confidence"] is not None and p["ocr_confidence"] < threshold),
             text_chars=len(p["text"] or p["raw_text"]),
             image_url=page_image_url(doc_id, p["page_no"]),
         )
@@ -86,12 +90,18 @@ def page_image(doc_id: int, page_no: int, services: Services = Depends(get_servi
 
 
 @router.post("/{doc_id}/reprocess", response_model=DocumentOut, status_code=202)
-def reprocess_document(doc_id: int, background: BackgroundTasks, services: Services = Depends(get_services)):
+def reprocess_document(
+    doc_id: int,
+    background: BackgroundTasks,
+    full: bool = False,
+    services: Services = Depends(get_services),
+):
+    """Redo failed, garbled or missing pages (full=false), or every page (full=true)."""
     doc = _get_or_404(services, doc_id)
     if doc["status"] in BUSY[1:]:
         raise HTTPException(409, "Document is already being processed.")
     services.db.set_status(doc_id, "uploaded")
-    background.add_task(services.pipeline.process, doc_id)
+    background.add_task(services.pipeline.process, doc_id, full)
     return DocumentOut(**services.db.get_document(doc_id))
 
 

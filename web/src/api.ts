@@ -11,6 +11,7 @@ export interface DocumentOut {
   sha256: string
   page_count: number
   pages_done: number
+  pages_failed: number
   status: DocStatus
   error: string | null
   uploaded_at: string
@@ -22,6 +23,9 @@ export interface PageOut {
   method: string
   reason: string | null
   ocr_confidence: number | null
+  ocr_status: 'ok' | 'low_quality' | 'failed'
+  quality: number | null
+  error: string | null
   low_confidence: boolean
   text_chars: number
   image_url: string
@@ -50,6 +54,7 @@ export interface AskOut {
   latency_ms: number
   cached: boolean
   note: string | null
+  timings: Record<string, number> | null
 }
 
 export interface Health {
@@ -96,7 +101,8 @@ export const api = {
     form.append('file', file)
     return request<{ document: DocumentOut; duplicate: boolean }>('POST', '/documents', form)
   },
-  reprocess: (id: number) => request<DocumentOut>('POST', `/documents/${id}/reprocess`),
+  reprocess: (id: number, full = false) =>
+    request<DocumentOut>('POST', `/documents/${id}/reprocess${full ? '?full=true' : ''}`),
   remove: (id: number) => request<void>('DELETE', `/documents/${id}`),
   ask: (question: string, documentIds: number[] | null) =>
     request<AskOut>('POST', '/ask', JSON.stringify({ question, document_ids: documentIds }), true),

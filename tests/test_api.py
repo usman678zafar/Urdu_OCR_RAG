@@ -37,7 +37,7 @@ def test_upload_index_ask_and_cite(client, services):
     assert detail["status"] == "ready", detail["error"]
     assert detail["pages_done"] == 3
     methods = [p["method"] for p in detail["pages"]]
-    assert methods == ["text", "text", "ocr"]
+    assert methods == ["text", "text", "fake"]  # the OCR engine that read the page
     assert detail["pages"][2]["low_confidence"] is True
     assert services.ocr.calls == 1
 

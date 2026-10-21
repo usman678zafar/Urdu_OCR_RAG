@@ -89,7 +89,7 @@ The image includes Tesseract with the Urdu model. Models are cached in a named v
 | GET | `/documents` | List documents with status (`uploaded`, `extracting`, `indexing`, `ready`, `failed`) and page progress |
 | GET | `/documents/{id}` | One document with per-page method, classifier reason, OCR confidence and a low-confidence flag |
 | GET | `/documents/{id}/pages/{n}/image` | Page image for citation previews |
-| POST | `/documents/{id}/reprocess` | Run indexing again (after changing OCR engine or classifier settings, or after a failure) |
+| POST | `/documents/{id}/reprocess` | Redo failed, garbled or unfinished pages and rebuild the index (resumes an interrupted run). `?full=true` redoes every page |
 | DELETE | `/documents/{id}` | Remove a document, its pages, chunks, vectors and files |
 | POST | `/ask` | `{"question": "...", "document_ids": [1, 2]}` → answer, language, `found`, `grounded`, citations |
 | GET | `/health` | Service check |
@@ -146,13 +146,21 @@ All settings are in [app/config.py](app/config.py) and can be set in `.env`. The
 | Setting | Default | Notes |
 | --- | --- | --- |
 | `OCR_ENGINE` | `tesseract` | `gemini`, `claude` and `docai` send page images to outside services |
+| `OCR_FALLBACK_ENABLED` / `OCR_FALLBACK_ENGINE` | `true` / `gemini` | When Tesseract's output on a page looks garbled, OCR that page again with the fallback. `false` never sends page images out for a fallback |
+| `OCR_MIN_URDU_SHARE` | `0.85` | Tesseract output with Urdu letters between 10% and this share of all letters counts as garbled |
+| `OCR_CONCURRENCY` | `4` | Pages OCR'd at once; halved automatically while the OCR service returns 429 |
+| `OCR_MAX_ATTEMPTS` / `OCR_RETRY_BASE_DELAY` | `4` / `2.0` | Retries on 429, 5xx and timeouts, with backoff 2s, 4s, 8s plus jitter; then the page is marked failed |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | e5 models get their `query:`/`passage:` prefixes automatically |
 | `RERANKER_ENABLED` | `true` | |
-| `RERANK_MIN_SCORE` | unset | When set, low-scoring retrievals answer "not found" without calling the LLM |
+| `RERANKER_MAX_LENGTH` | `512` | Tokens per question + chunk pair; lower is faster on CPU |
+| `PRELOAD_MODELS` | `true` | Load the embedder and reranker in the background at startup so the first question is not slow |
+| `MIN_RELEVANCE_SCORE` | unset | When the best chunk scores below this, answer "not found" without calling the LLM. Compared with the reranker score (0–1), or with vector similarity (0–1) when the reranker is off |
+| `DEBUG_TIMINGS` | `false` | Add per-step timings (embedding, vector search, BM25, rerank, LLM) to `/ask` responses; they are always logged |
 | `FINAL_TOP_K` | `6` | Chunks sent to the LLM |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `800` / `150` | Characters |
 | `LLM_PROVIDER` / `GEMINI_MODEL` | `gemini` / `gemini-2.5-flash` | Also `openai` or `anthropic` |
 | `LLM_BACKUP_PROVIDER` | unset | e.g. `openai`: used only when the primary fails (quota, outage, bad output). `OPENAI_BASE_URL` points it at any OpenAI-compatible API |
+| `GEMINI_OCR_MODEL` | `GEMINI_MODEL` | Model used when `OCR_ENGINE` or the fallback is `gemini`; a fast lite model is usually enough |
 | `GEMINI_THINKING_BUDGET` | `0` | `0` is fastest; `-1` lets Gemini think, which may help accuracy at some latency cost |
 | `LOW_CONFIDENCE_THRESHOLD` | `0.6` | OCR pages below this are flagged |
 

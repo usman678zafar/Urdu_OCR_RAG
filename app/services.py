@@ -67,6 +67,18 @@ class Services:
         self.__dict__["_ocr"] = value
 
     @property
+    def fallback_ocr(self) -> OCREngine | None:
+        """Engine for pages Tesseract garbles; None when disabled or the same as the primary."""
+        s = self.settings
+        if not s.ocr_fallback_enabled or s.ocr_fallback_engine == s.ocr_engine:
+            return None
+        return self._locked("_fallback_ocr", lambda: make_ocr_engine(s.ocr_fallback_engine, s))
+
+    @fallback_ocr.setter
+    def fallback_ocr(self, value: OCREngine | None) -> None:
+        self.__dict__["_fallback_ocr"] = value
+
+    @property
     def llm(self) -> AnswerLLM:
         return self._locked("_llm", lambda: ProviderLLM(self.settings))
 
@@ -86,6 +98,7 @@ class Services:
             embedder_factory=lambda: self.embedder,
             store_factory=lambda: self.vector_store,
             ocr_factory=lambda: self.ocr,
+            fallback_ocr_factory=lambda: self.fallback_ocr,
         )
 
     @property

@@ -13,7 +13,9 @@ class CrossEncoderReranker:
     def __init__(self, settings: Settings):
         from sentence_transformers import CrossEncoder
 
-        self.model = CrossEncoder(settings.reranker_model, device=settings.embedding_device, max_length=512)
+        self.model = CrossEncoder(
+            settings.reranker_model, device=settings.embedding_device, max_length=settings.reranker_max_length
+        )
 
     def score(self, query: str, passages: list[str]) -> list[float]:
         if not passages:
