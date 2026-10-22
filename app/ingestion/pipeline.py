@@ -20,7 +20,7 @@ from app.ingestion.classifier import classify_text
 from app.ingestion.ocr import OCREngine, OCRResult
 from app.ingestion.ocr_quality import ocr_quality
 from app.ingestion.retry import AdaptiveLimiter, call_with_retry, status_of
-from app.processing.bidi import fix_word_order
+from app.processing.bidi import WordOrderVotes, document_is_reversed, reverse_urdu_lines, word_order_votes
 from app.processing.chunking import chunk_pages
 from app.processing.cleanup import strip_headers_footers
 from app.processing.normalize import normalize
@@ -100,6 +100,10 @@ class IndexingPipeline:
         # bounds how many rendered high-dpi page images wait in memory for a worker
         slots = threading.BoundedSemaphore(s.ocr_concurrency * 2)
 
+        order_votes: list[WordOrderVotes] = []
+        # text-layer pages too ambiguous to judge alone: page_no -> (text, reason, image_path)
+        unsure_order: dict[int, tuple[str, str, str]] = {}
+
         with (
             pymupdf.open(self.original_path(doc_row["sha256"])) as doc,
             ThreadPoolExecutor(max_workers=s.ocr_concurrency, thread_name_prefix="ocr") as pool,
@@ -119,8 +123,14 @@ class IndexingPipeline:
                 text = pdf.page_text(page)
                 decision = classify_text(text, pdf.image_coverage(page), s)
                 if decision.method == "text":
-                    text, flipped = fix_word_order(text)
-                    reason = decision.reason + ("; word order repaired" if flipped else "")
+                    votes = word_order_votes(text)
+                    order_votes.append(votes)
+                    reason = decision.reason
+                    if votes.reversed:
+                        text = reverse_urdu_lines(text)
+                        reason += "; word order repaired"
+                    elif not votes.in_order:
+                        unsure_order[page_no] = (text, reason, str(image_path))
                     self.db.save_page(
                         doc_id,
                         page_no,
@@ -151,6 +161,22 @@ class IndexingPipeline:
                 futures.append(future)
             for future in futures:
                 future.result()
+
+        if unsure_order and document_is_reversed(order_votes):
+            for page_no, (text, reason, image_path) in unsure_order.items():
+                fixed = reverse_urdu_lines(text)
+                if fixed == text:  # no Urdu lines
+                    continue
+                self.db.save_page(
+                    doc_id,
+                    page_no,
+                    "text",
+                    reason + "; word order repaired (whole document is reversed)",
+                    text="",
+                    raw_text=fixed,
+                    image_path=image_path,
+                    ocr_confidence=None,
+                )
 
         self.db.set_status(doc_id, "indexing")
         pages = self.db.get_pages(doc_id)

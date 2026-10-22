@@ -57,6 +57,17 @@ export interface AskOut {
   timings: Record<string, number> | null
 }
 
+/** Backend pipeline steps, in the order they run (see app/retrieval/hybrid.py). */
+export type AskStep = 'embed_query' | 'vector_search' | 'bm25' | 'fetch_chunks' | 'rerank' | 'llm'
+
+/** Progress events from POST /ask/stream, one JSON object per line. */
+export type AskEvent =
+  | { type: 'step'; step: AskStep }
+  | { type: 'candidates'; count: number }
+  | { type: 'sources'; sources: { filename: string; page_no: number }[] }
+  | { type: 'result'; result: AskOut }
+  | { type: 'error'; detail: string }
+
 export interface Health {
   status: string
   documents: number
@@ -68,15 +79,17 @@ export interface Health {
 
 export class ApiError extends Error {}
 
-async function request<T>(method: string, path: string, body?: BodyInit, json = false): Promise<T> {
+async function send(method: string, path: string, body?: BodyInit, json = false, signal?: AbortSignal) {
   let res: Response
   try {
     res = await fetch(BASE + path, {
       method,
       body,
+      signal,
       headers: json ? { 'Content-Type': 'application/json' } : undefined,
     })
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err
     throw new ApiError('Cannot reach the backend. Is it running on port 8000?')
   }
   if (!res.ok) {
@@ -89,7 +102,41 @@ async function request<T>(method: string, path: string, body?: BodyInit, json = 
     }
     throw new ApiError(`${res.status}: ${detail}`)
   }
+  return res
+}
+
+async function request<T>(method: string, path: string, body?: BodyInit, json = false): Promise<T> {
+  const res = await send(method, path, body, json)
   return (res.status === 204 ? undefined : await res.json()) as T
+}
+
+/** Ask with live progress: calls onEvent for each step and resolves with the answer. */
+async function askStream(
+  question: string,
+  documentIds: number[] | null,
+  onEvent: (e: AskEvent) => void,
+  signal?: AbortSignal,
+): Promise<AskOut> {
+  const body = JSON.stringify({ question, document_ids: documentIds })
+  const res = await send('POST', '/ask/stream', body, true, signal)
+  if (!res.body) throw new ApiError('The backend sent an empty response.')
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffered = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffered += value
+    const lines = buffered.split('\n')
+    buffered = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const event = JSON.parse(line) as AskEvent
+      if (event.type === 'result') return event.result
+      if (event.type === 'error') throw new ApiError(event.detail)
+      onEvent(event)
+    }
+  }
+  throw new ApiError('The connection closed before the answer arrived.')
 }
 
 export const api = {
@@ -106,6 +153,7 @@ export const api = {
   remove: (id: number) => request<void>('DELETE', `/documents/${id}`),
   ask: (question: string, documentIds: number[] | null) =>
     request<AskOut>('POST', '/ask', JSON.stringify({ question, document_ids: documentIds }), true),
+  askStream,
 }
 
 /** Backend returns paths like /documents/1/pages/2/image; route them through the proxy. */

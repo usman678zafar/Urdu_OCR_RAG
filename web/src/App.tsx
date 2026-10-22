@@ -1,32 +1,22 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { api, ApiError, type AskOut, type DocumentOut, type Health } from './api'
-import { Answer } from './components/Answer'
-import { BidiText, Spinner } from './components/common'
+import { useCallback, useEffect, useState } from 'react'
+import { api, type DocumentOut, type Health } from './api'
+import { ChatPanel } from './components/ChatPanel'
 import { DocumentDetail } from './components/DocumentDetail'
-import { Sidebar } from './components/Sidebar'
-
-interface Turn {
-  id: number
-  question: string
-  scope: string
-  res?: AskOut
-  error?: string
-}
-
-const EXAMPLES = ['بینظیر بھٹو پہلی بار وزیر اعظم کب بنیں؟', 'What is this document about?', 'اس کتاب کا مصنف کون ہے؟']
+import { ChatIcon, LayersIcon } from './components/icons'
+import { Library } from './components/Library'
+import { NavRail } from './components/NavRail'
+import type { LibraryFilter } from './library'
 
 export default function App() {
   const [docs, setDocs] = useState<DocumentOut[]>([])
   const [health, setHealth] = useState<Health | null>(null)
   const [offline, setOffline] = useState(false)
   const [selected, setSelected] = useState<number[]>([])
-  const [question, setQuestion] = useState('')
-  const [turns, setTurns] = useState<Turn[]>([])
-  const [asking, setAsking] = useState(false)
+  const [filter, setFilter] = useState<LibraryFilter>('all')
   const [detailId, setDetailId] = useState<number | null>(null)
   const [notice, setNotice] = useState<{ msg: string; kind: 'error' | 'info' } | null>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const bottom = useRef<HTMLDivElement>(null)
+  const [navOpen, setNavOpen] = useState(false)
+  const [mobileView, setMobileView] = useState<'library' | 'chat'>('chat')
 
   const refresh = useCallback(async () => {
     try {
@@ -50,152 +40,63 @@ export default function App() {
   }, [refresh, busy])
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [turns])
-
-  useEffect(() => {
     if (!notice) return
     const t = setTimeout(() => setNotice(null), 6000)
     return () => clearTimeout(t)
   }, [notice])
 
-  const ready = docs.filter((d) => d.status === 'ready')
-
-  async function ask(e?: FormEvent) {
-    e?.preventDefault()
-    const q = question.trim()
-    if (!q || asking) return
-    if (!ready.length) {
-      setNotice({ msg: 'No documents are ready yet. Upload a PDF and wait for it to finish indexing.', kind: 'info' })
-      return
-    }
-    const scope = selected.length
-      ? ready.filter((d) => selected.includes(d.id)).map((d) => d.filename).join(', ')
-      : 'All documents'
-    const id = Date.now()
-    setTurns((t) => [...t, { id, question: q, scope }])
-    setQuestion('')
-    setAsking(true)
-    try {
-      const res = await api.ask(q, selected.length ? selected : null)
-      setTurns((t) => t.map((x) => (x.id === id ? { ...x, res } : x)))
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err)
-      setTurns((t) => t.map((x) => (x.id === id ? { ...x, error: msg } : x)))
-    } finally {
-      setAsking(false)
-    }
-  }
+  const toggle = (id: number) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+  const showNotice = (msg: string, kind: 'error' | 'info' = 'error') => setNotice({ msg, kind })
 
   return (
-    <div className={`app ${sidebarOpen ? 'sidebar-open' : ''}`}>
-      <Sidebar
+    <div className={`app ${navOpen ? 'nav-open' : ''} view-${mobileView}`}>
+      <NavRail
         docs={docs}
+        health={health}
+        offline={offline}
+        filter={filter}
+        onFilter={(f) => {
+          setFilter(f)
+          setNavOpen(false)
+          setMobileView('library')
+        }}
         selected={selected}
-        onToggle={(id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))}
+        onToggle={toggle}
+        onClearSelection={() => setSelected([])}
+      />
+      <div className="scrim" onClick={() => setNavOpen(false)} />
+
+      <Library
+        docs={docs}
+        filter={filter}
+        selected={selected}
+        onToggle={toggle}
+        onSelect={setSelected}
         onChanged={refresh}
         onOpen={setDetailId}
-        onNotice={(msg, kind = 'error') => setNotice({ msg, kind })}
+        onNotice={showNotice}
+        onMenu={() => setNavOpen(true)}
       />
-      <div className="scrim" onClick={() => setSidebarOpen(false)} />
 
-      <main className="main">
-        <header className="topbar">
-          <button className="icon-btn menu-btn" onClick={() => setSidebarOpen((o) => !o)} aria-label="Documents">
-            ☰
-          </button>
-          <div className="topbar-title">Ask your documents</div>
-          <div className="topbar-status">
-            {offline ? (
-              <span className="dot dot-bad">Backend offline</span>
-            ) : health ? (
-              <>
-                <span className="dot dot-ok">
-                  {health.ready}/{health.documents} ready
-                </span>
-                <span className="chip" title="Answering model">{health.llm_model}</span>
-                <span className="chip" title="OCR engine">OCR: {health.ocr_engine}</span>
-              </>
-            ) : null}
-          </div>
-        </header>
+      <ChatPanel
+        docs={docs}
+        health={health}
+        offline={offline}
+        selected={selected}
+        onClearSelection={() => setSelected([])}
+        onNotice={showNotice}
+      />
 
-        {notice && <div className={`toast notice notice-${notice.kind}`}>{notice.msg}</div>}
+      <nav className="view-tabs" aria-label="Switch view">
+        <button className={mobileView === 'library' ? 'active' : ''} onClick={() => setMobileView('library')}>
+          <LayersIcon /> Documents
+        </button>
+        <button className={mobileView === 'chat' ? 'active' : ''} onClick={() => setMobileView('chat')}>
+          <ChatIcon /> Assistant
+        </button>
+      </nav>
 
-        <section className="conversation">
-          {turns.length === 0 ? (
-            <div className="welcome">
-              <h1>
-                Urdu Document Q&amp;A
-                <span className="welcome-ur" dir="rtl">
-                  اپنی دستاویزات سے پوچھیں
-                </span>
-              </h1>
-              <p className="muted">
-                Upload Urdu or English PDFs, then ask questions. Every answer cites the file, page and passage it
-                came from.
-              </p>
-              <div className="examples">
-                {EXAMPLES.map((ex) => (
-                  <button key={ex} className="example" dir="auto" onClick={() => setQuestion(ex)}>
-                    {ex}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            turns.map((t) => (
-              <div key={t.id} className="turn">
-                <div className="question-bubble">
-                  <BidiText text={t.question} />
-                  <div className="scope">{t.scope}</div>
-                </div>
-                {t.res ? (
-                  <Answer res={t.res} />
-                ) : t.error ? (
-                  <div className="notice notice-error">{t.error}</div>
-                ) : (
-                  <div className="thinking">
-                    <Spinner /> Searching documents and writing an answer…
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-          <div ref={bottom} />
-        </section>
-
-        <form className="composer" onSubmit={ask}>
-          {selected.length > 0 && (
-            <div className="composer-scope">
-              Searching {selected.length} selected document{selected.length > 1 ? 's' : ''}
-              <button type="button" className="link" onClick={() => setSelected([])}>
-                search all
-              </button>
-            </div>
-          )}
-          <div className="composer-box">
-            <textarea
-              dir="auto"
-              value={question}
-              placeholder="Ask a question… / اپنا سوال لکھیں"
-              rows={1}
-              maxLength={2000}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  ask()
-                }
-              }}
-            />
-            <button className="btn btn-primary" type="submit" disabled={!question.trim() || asking}>
-              {asking ? <Spinner /> : 'Ask'}
-            </button>
-          </div>
-          <div className="composer-hint muted">Enter to send · Shift+Enter for a new line</div>
-        </form>
-      </main>
+      {notice && <div className={`toast notice notice-${notice.kind}`}>{notice.msg}</div>}
 
       {detailId !== null && (
         <DocumentDetail id={detailId} onClose={() => setDetailId(null)} onChanged={refresh} />

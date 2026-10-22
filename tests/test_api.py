@@ -1,5 +1,7 @@
 """End to end through the HTTP API with fake models: upload -> index -> ask -> cite."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -102,6 +104,19 @@ def test_ask_with_no_documents_loads_no_models(client, services):
     r = client.post("/ask", json={"question": "آخری تاریخ کیا ہے؟"}).json()
     assert r["found"] is False and r["language"] == "ur" and r["note"]
     assert "_answers" not in services.__dict__  # retriever, embedder and LLM never built
+
+
+def test_ask_stream_reports_steps_then_the_answer(client):
+    upload(client, make_pdf([ENGLISH_PARAGRAPH]))
+    r = client.post("/ask/stream", json={"question": "What is the monthly stipend for each student?"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
+    events = [json.loads(line) for line in r.text.splitlines()]
+    steps = [e["step"] for e in events if e["type"] == "step"]
+    assert steps == ["embed_query", "vector_search", "bm25", "fetch_chunks", "rerank", "llm"]
+    sources = next(e for e in events if e["type"] == "sources")["sources"]
+    assert sources[0] == {"filename": "policy.pdf", "page_no": 1}
+    assert events[-1]["type"] == "result"
+    assert events[-1]["result"]["found"] and events[-1]["result"]["citations"]
 
 
 def test_reprocess_and_health(client):

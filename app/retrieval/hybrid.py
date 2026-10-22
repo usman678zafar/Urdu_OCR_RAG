@@ -2,7 +2,7 @@
 then reordered by the cross-encoder reranker."""
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -14,6 +14,9 @@ from app.retrieval.reranker import Reranker
 from app.retrieval.vector_store import VectorStore
 
 RRF_K = 60
+
+# Receives progress events while a question is answered, e.g. {"type": "step", "step": "rerank"}
+Progress = Callable[[dict], None]
 
 
 @dataclass
@@ -30,8 +33,11 @@ class RetrievedChunk:
 
 
 @contextmanager
-def timed(timings: dict[str, int] | None, step: str) -> Iterator[None]:
-    """Add the block's wall time in milliseconds to timings[step]."""
+def timed(timings: dict[str, int] | None, step: str, progress: Progress | None = None) -> Iterator[None]:
+    """Add the block's wall time in milliseconds to timings[step], announcing the step to
+    `progress` as it starts."""
+    if progress is not None:
+        progress({"type": "step", "step": step})
     start = time.perf_counter()
     try:
         yield
@@ -71,24 +77,25 @@ class HybridRetriever:
         document_ids: list[int] | None = None,
         top_k: int | None = None,
         timings: dict[str, int] | None = None,
+        progress: Progress | None = None,
     ) -> list[RetrievedChunk]:
         """Best chunks for the query; per-step milliseconds are added to `timings` if given."""
         s = self.settings
         top_k = top_k or s.final_top_k
 
-        with timed(timings, "embed_query"):
+        with timed(timings, "embed_query", progress):
             query_vector = self.embedder.embed_query(normalized_query)
-        with timed(timings, "vector_search"):
+        with timed(timings, "vector_search", progress):
             dense_hits = self.store.search(query_vector, s.dense_top_k, document_ids)
         dense = [cid for cid, _ in dense_hits]
         similarity = dict(dense_hits)
-        with timed(timings, "bm25"):
+        with timed(timings, "bm25", progress):
             keyword = [cid for cid, _ in self.bm25.search(normalized_query, s.bm25_top_k, document_ids)]
         fused = rrf_fuse(dense, keyword)[: s.candidate_k]
         if not fused:
             return []
 
-        with timed(timings, "fetch_chunks"):
+        with timed(timings, "fetch_chunks", progress):
             rows = self.db.get_chunks([cid for cid, _ in fused])
         # skip chunks whose document was deleted or is mid-reprocessing
         candidates = [
@@ -100,7 +107,9 @@ class HybridRetriever:
         bm25_rank = {cid: i for i, cid in enumerate(keyword)}
 
         if self.reranker is not None:
-            with timed(timings, "rerank"):
+            if progress is not None:
+                progress({"type": "candidates", "count": len(candidates)})
+            with timed(timings, "rerank", progress):
                 scores = self.reranker.score(normalized_query, [rows[cid]["text"] for cid, _ in candidates])
             candidates = sorted(zip([c for c, _ in candidates], scores), key=lambda x: x[1], reverse=True)
 

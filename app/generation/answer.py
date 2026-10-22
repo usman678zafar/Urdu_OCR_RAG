@@ -13,7 +13,7 @@ from app.generation.llm import AnswerLLM
 from app.generation.prompts import NOT_FOUND, build_user_message
 from app.processing.language import question_language
 from app.processing.normalize import normalize
-from app.retrieval.hybrid import HybridRetriever, RetrievedChunk, timed
+from app.retrieval.hybrid import HybridRetriever, Progress, RetrievedChunk, timed
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,14 @@ class AnswerService:
         self._cache: OrderedDict[tuple, AnswerResult] = OrderedDict()
         self._cache_lock = threading.Lock()
 
-    def ask(self, question: str, document_ids: list[int] | None = None, log: bool = True) -> AnswerResult:
+    def ask(
+        self,
+        question: str,
+        document_ids: list[int] | None = None,
+        log: bool = True,
+        progress: Progress | None = None,
+    ) -> AnswerResult:
+        """Answer a question; `progress`, if given, hears about each step as it starts."""
         start = time.perf_counter()
         normalized = normalize(question)
         language = question_language(normalized)
@@ -72,8 +79,11 @@ class AnswerService:
             return result
 
         timings: dict[str, int] = {}
-        chunks = self.retriever.retrieve(normalized, list(doc_key) or None, timings=timings)
-        result = self._generate(question, normalized, language, chunks, timings)
+        chunks = self.retriever.retrieve(normalized, list(doc_key) or None, timings=timings, progress=progress)
+        if progress is not None:
+            pages = list(dict.fromkeys((c.filename, c.page_no) for c in chunks))
+            progress({"type": "sources", "sources": [{"filename": f, "page_no": p} for f, p in pages]})
+        result = self._generate(question, normalized, language, chunks, timings, progress)
         result.latency_ms = int((time.perf_counter() - start) * 1000)
         timings["total"] = result.latency_ms
         result.timings = timings
@@ -115,6 +125,7 @@ class AnswerService:
         language: str,
         chunks: list[RetrievedChunk],
         timings: dict[str, int] | None = None,
+        progress: Progress | None = None,
     ) -> AnswerResult:
         if not chunks:
             return self._not_found(question, language, chunks)
@@ -123,7 +134,7 @@ class AnswerService:
         if min_score is not None and top is not None and top < min_score:
             return self._not_found(question, language, chunks)
 
-        with timed(timings, "llm"):
+        with timed(timings, "llm", progress):
             llm_answer = self.llm.answer(build_user_message(normalized, language, chunks))
         if llm_answer.refused:
             return self._not_found(
