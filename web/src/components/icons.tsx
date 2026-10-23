@@ -147,6 +147,33 @@ export const PagesIcon = (p: SVGProps<SVGSVGElement>) => (
   </Icon>
 )
 
+/** Gemini's four-pointed star. */
+export function GeminiMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <defs>
+        <linearGradient id="gemini-g" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stopColor="#1c7df0" />
+          <stop offset="0.55" stopColor="#6f6cf2" />
+          <stop offset="1" stopColor="#b26cf0" />
+        </linearGradient>
+      </defs>
+      <path d="M12 2c.6 5.3 4.7 9.4 10 10-5.3.6-9.4 4.7-10 10-.6-5.3-4.7-9.4-10-10 5.3-.6 9.4-4.7 10-10z" fill="url(#gemini-g)" />
+    </svg>
+  )
+}
+
+/** A tesseract: a cube inside a cube with joined corners. */
+export function TesseractMark({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#2563c9" strokeWidth="1.6" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="1.5" />
+      <rect x="8" y="8" width="8" height="8" rx="1" fill="#2563c9" fillOpacity="0.15" />
+      <path d="M3 3l5 5M21 3l-5 5M3 21l5-5M21 21l-5-5" />
+    </svg>
+  )
+}
+
 /** Harf (حرف, "letter"): the letter noon ن, a bowl with a diamond nuqta, on an indigo tile. */
 export function Logo({ size = 40 }: { size?: number }) {
   return (

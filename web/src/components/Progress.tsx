@@ -87,7 +87,7 @@ export function AskProgressCard({ progress, onStop }: { progress: AskProgress; o
             <span className="stage-label">{s.label}</span>
             <span className="stage-time">
               {s.status === 'done' && s.start !== undefined && s.end !== undefined && formatDuration(s.end - s.start)}
-              {s.status === 'active' && s.start !== undefined && formatDuration(now - s.start)}
+              {s.status === 'active' && s.start !== undefined && formatDuration(Math.max(0, now - s.start))}
             </span>
             {s.status === 'active' && <div className="stage-hint">{HINTS[s.key]?.(progress)}</div>}
           </li>

@@ -1,7 +1,18 @@
 import type { ReactNode } from 'react'
 import type { DocumentOut, Health } from '../api'
 import { displayName, FILTERS, type LibraryFilter } from '../library'
-import { AlertIcon, CheckCircleIcon, LayersIcon, LoaderIcon, Logo, PagesIcon, ScanIcon, SparkIcon } from './icons'
+import {
+  AlertIcon,
+  CheckCircleIcon,
+  GeminiMark,
+  LayersIcon,
+  LoaderIcon,
+  Logo,
+  PagesIcon,
+  ScanIcon,
+  SparkIcon,
+  TesseractMark,
+} from './icons'
 
 const FILTER_ICON: Record<LibraryFilter, ReactNode> = {
   all: <LayersIcon />,
@@ -92,8 +103,8 @@ export function NavRail({ docs, health, offline, filter, onFilter, selected, onT
         {health && !offline && (
           <ul className="sys-list">
             <li title="Model that writes the answers">
-              <span className="sys-icon">
-                <SparkIcon />
+              <span className="sys-icon sys-logo">
+                {health.llm_model.toLowerCase().includes('gemini') ? <GeminiMark /> : <SparkIcon />}
               </span>
               <span className="sys-text">
                 <span className="sys-label">Model</span>
@@ -101,8 +112,14 @@ export function NavRail({ docs, health, offline, filter, onFilter, selected, onT
               </span>
             </li>
             <li title="Engine that reads scanned pages">
-              <span className="sys-icon">
-                <ScanIcon />
+              <span className="sys-icon sys-logo">
+                {health.ocr_engine === 'tesseract' ? (
+                  <TesseractMark />
+                ) : health.ocr_engine === 'gemini' ? (
+                  <GeminiMark />
+                ) : (
+                  <ScanIcon />
+                )}
               </span>
               <span className="sys-text">
                 <span className="sys-label">OCR</span>

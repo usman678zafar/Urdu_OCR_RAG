@@ -116,6 +116,7 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .sys-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .sys-list li { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: default; }
 .sys-icon { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line); }
+.sys-logo { background: var(--surface); border-color: var(--border); box-shadow: 0 1px 2px rgba(23, 23, 60, 0.06); }
 .sys-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .sys-label { font-size: 0.68rem; color: var(--muted); }
 .sys-value { font-size: 0.82rem; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
